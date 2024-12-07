@@ -20,8 +20,8 @@ use kronos_ebpf::{
 };
 
 use kronos_common::{
-    BinaryAllowMap, BinaryMap, DNSAllowMap, DNSRule, FileMap, PodBpfMap, TCPAllowMap, TCPRule,
-    UDPAllowMap, UDPRule,
+    BinaryAllowMap, BinaryMap, DNSAllowMap, DNSRule, FileMap, NRule, NetworkAllowValue,
+    NetworkRule, PodBpfMap, TCPAllowMap, TCPRule, UDPAllowMap, UDPRule,
 };
 
 use network_types::{
@@ -78,38 +78,25 @@ static KRONOS_BINARY_MAP: HashMap<u64, u8> = HashMap::with_max_entries(1024, 0);
 maps for Network target
  */
 
-// #[map]
-// static KRONOS_NETWORK_MAP: HashMap<u64, NetworkInfo> = HashMap::with_max_entries(1024, 0);
+#[map]
+static KRONOS_NETWORK_MAP: HashMap<u64, NRule> = HashMap::with_max_entries(1024, 0);
 
 #[map]
-static KRONOS_ALLOW_TCP_MAP: HashMap<u64, TCPAllowMap> = HashMap::with_max_entries(1024, 0);
+static KRONOS_ALLOW_NETWORK_MAP: HashMap<u64, NetworkAllowValue> =
+    HashMap::with_max_entries(1024, 0);
 
-#[map]
-static KRONOS_TCP_MAP: HashMap<u64, TCPRule> = HashMap::with_max_entries(1024, 0);
-
-#[map]
-static KRONOS_ALLOW_UDP_MAP: HashMap<u64, UDPAllowMap> = HashMap::with_max_entries(1024, 0);
-
-#[map]
-static KRONOS_UDP_MAP: HashMap<u64, UDPRule> = HashMap::with_max_entries(1024, 0);
-
-#[map]
-static KRONOS_ALLOW_DNS_MAP: HashMap<u64, DNSAllowMap> = HashMap::with_max_entries(1024, 0);
-#[map]
-static KRONOS_DNS_MAP: HashMap<u64, DNSRule> = HashMap::with_max_entries(1024, 0);
-
-#[lsm(hook = "socket_connect")]
-pub fn task_setnice(ctx: LsmContext) -> i32 {
-    match try_task_setnice(ctx) {
-        Ok(ret) => ret,
-        Err(ret) => ret,
-    }
-}
-
-fn try_task_setnice(ctx: LsmContext) -> Result<i32, i32> {
-    info!(&ctx, "lsm hook socket_connect called");
-    Ok(0)
-}
+// #[lsm(hook = "socket_connect")]
+// pub fn task_setnice(ctx: LsmContext) -> i32 {
+//     match try_task_setnice(ctx) {
+//         Ok(ret) => ret,
+//         Err(ret) => ret,
+//     }
+// }
+//
+// fn try_task_setnice(ctx: LsmContext) -> Result<i32, i32> {
+//     info!(&ctx, "lsm hook socket_connect called");
+//     Ok(0)
+// }
 
 #[cgroup_skb]
 pub fn cskb_igress(ctx: SkBuffContext) -> i32 {
@@ -151,10 +138,8 @@ unsafe fn try_cskb(ctx: SkBuffContext, direction: i8) -> Result<i32, i32> {
                     let src_addr = u32::from_be(unsafe { skb.local_ip4 });
 
                     let dest_addr = u32::from_be(unsafe { skb.remote_ip4 });
-                    // 167872123
                     let dport = u32::from_be(unsafe { skb.remote_port });
 
-                    // if dest_addr == 167872123 {
                     // Ensure we can access the packet data
                     let data = skb.data as usize;
                     let data_end = skb.data_end as usize;
@@ -189,25 +174,21 @@ unsafe fn try_cskb(ctx: SkBuffContext, direction: i8) -> Result<i32, i32> {
 
                             let hash = des as u64 ^ label_namespace_key;
 
-                            if let Some(value) = KRONOS_ALLOW_TCP_MAP.get(&label_namespace_key) {
-                                if let TCPAllowMap::LNvalue(allow_rule) = value {
-                                    let count = allow_rule.count;
-                                    let action = allow_rule.action;
+                            if let Some(value) = KRONOS_ALLOW_NETWORK_MAP.get(&label_namespace_key)
+                            {
+                                if let NetworkAllowValue::LNValue { dns, udp, tcp } = value {
+                                    let count = tcp.count;
+                                    let action = tcp.action;
 
                                     // Handle "only allow" logic
                                     if count > 0 {
-                                        return handle_net_allow(
-                                            hash,
-                                            action,
-                                            Some(1),
-                                            NetworkTargets::TCP,
-                                        );
+                                        return handle_net_allow(hash, action, direction);
                                     }
                                 }
                             }
 
                             // Check fallback UDP map when not in "only allow"
-                            return handle_net(hash, NetworkTargets::TCP, Some(1));
+                            return handle_net(hash, direction);
                         }
                         17 => {
                             if trans_layer_start + core::mem::size_of::<UdpHdr>() > data_end {
@@ -257,30 +238,30 @@ unsafe fn try_cskb(ctx: SkBuffContext, direction: i8) -> Result<i32, i32> {
                                             my_str
                                         );
                                         let hash = djb2_hash_dns(&buf);
-                                        let hash = hash as u64;
+                                        let final_hash = hash ^ pod_bpf_map.namespace_hash;
+                                        let final_hash = final_hash as u64;
                                         info!(&ctx, "domain:{},hash:{}", my_str, hash);
 
                                         if let Some(value) =
-                                            KRONOS_ALLOW_DNS_MAP.get(&label_namespace_key)
+                                            KRONOS_ALLOW_NETWORK_MAP.get(&label_namespace_key)
                                         {
-                                            if let DNSAllowMap::LNvalue(allow_rule) = value {
-                                                let count = allow_rule.count;
-                                                let action = allow_rule.action;
+                                            if let NetworkAllowValue::LNValue { dns, udp, tcp } =
+                                                value
+                                            {
+                                                let count = dns.count;
+                                                let action = dns.action;
 
                                                 // Handle "only allow" logic
                                                 if count > 0 {
                                                     return handle_net_allow(
-                                                        hash,
-                                                        action,
-                                                        None,
-                                                        NetworkTargets::DNS,
+                                                        final_hash, action, direction,
                                                     );
                                                 }
                                             }
                                         }
 
                                         // Check fallback DNS map when not in "only allow"
-                                        let ret = handle_net(hash, NetworkTargets::DNS, None);
+                                        let ret = handle_net(final_hash, direction);
                                         match ret {
                                             Ok(x) => {
                                                 if x == 0 {
@@ -297,26 +278,22 @@ unsafe fn try_cskb(ctx: SkBuffContext, direction: i8) -> Result<i32, i32> {
                                     let hash = des as u64 ^ label_namespace_key;
 
                                     if let Some(value) =
-                                        KRONOS_ALLOW_UDP_MAP.get(&label_namespace_key)
+                                        KRONOS_ALLOW_NETWORK_MAP.get(&label_namespace_key)
                                     {
-                                        if let UDPAllowMap::LNvalue(allow_rule) = value {
-                                            let count = allow_rule.count;
-                                            let action = allow_rule.action;
+                                        if let NetworkAllowValue::LNValue { dns, udp, tcp } = value
+                                        {
+                                            let count = udp.count;
+                                            let action = udp.action;
 
                                             // Handle "only allow" logic
                                             if count > 0 {
-                                                return handle_net_allow(
-                                                    hash,
-                                                    action,
-                                                    Some(1),
-                                                    NetworkTargets::UDP,
-                                                );
+                                                return handle_net_allow(hash, action, direction);
                                             }
                                         }
                                     }
 
                                     // Check fallback UDP map when not in "only allow"
-                                    return handle_net(hash, NetworkTargets::UDP, Some(1));
+                                    return handle_net(hash, direction);
                                 }
                             }
                         }
@@ -338,155 +315,64 @@ unsafe fn try_cskb(ctx: SkBuffContext, direction: i8) -> Result<i32, i32> {
 }
 
 #[inline]
-fn handle_net_allow(
-    hash: u64,
-    action: u8,
-    direction: Option<i8>,
-    target: NetworkTargets,
-) -> Result<i32, i32> {
-    match target {
-        NetworkTargets::DNS => {
-            if let Some(value) = unsafe { KRONOS_ALLOW_DNS_MAP.get(&hash) } {
-                if let DNSAllowMap::Rule(dns_rule) = value {
-                    if let Some(max_request) = dns_rule.max_req {
-                        let req_count = dns_rule.num_of_request + 1;
-                        if req_count > max_request {
-                            // Exceeds allowed request count, drop the packet
-                            return Ok(0);
-                        }
-                    }
-                    // Allow the packet
-                    return Ok(1);
-                }
-            } else if action == 0 {
-                // Audit action, allow with alert
-                return Ok(1);
+fn handle_net_allow(hash: u64, action: u8, direction: i8) -> Result<i32, i32> {
+    if let Some(value) = unsafe { KRONOS_ALLOW_NETWORK_MAP.get(&hash) } {
+        if let NetworkAllowValue::Rule(rule) = value {
+            if direction != rule.direction || rule.direction != 0 {
+                // This logic checks the direction is same or applied for both else it
+                // will check the net_map for any rules
+                return handle_net(hash, direction);
             }
-        }
-        NetworkTargets::UDP => {
-            if let Some(value) = unsafe { KRONOS_ALLOW_UDP_MAP.get(&hash) } {
-                if let UDPAllowMap::Rule(udp_rule) = value {
-                    if let Some(direct) = direction {
-                        if direct != udp_rule.direction || udp_rule.direction != 0 {
-                            // This logic checks the direction is same or applied for both else it
-                            // will check the net_map for any rules
-                            return handle_net(hash, NetworkTargets::UDP, direction);
-                        }
-                    }
 
-                    if let Some(max_request) = udp_rule.max_req {
-                        let req_count = udp_rule.num_of_request + 1;
-                        if req_count > max_request {
-                            // Exceeds allowed request count, drop the packet
-                            return Ok(0);
-                        }
-                    }
-                    // Allow the packet
-                    return Ok(1);
-                }
-            } else if action == 0 {
-                // Audit action, allow with alert
-                return Ok(1);
-            }
-        }
-        NetworkTargets::TCP => {
-            if let Some(value) = unsafe { KRONOS_ALLOW_TCP_MAP.get(&hash) } {
-                if let TCPAllowMap::Rule(rule) = value {
-                    if let Some(direct) = direction {
-                        if direct != rule.direction || rule.direction != 0 {
-                            // This logic checks the direction is same or applied for both else it
-                            // will check the net_map for any rules
-                            return handle_net(hash, NetworkTargets::TCP, direction);
-                        }
-                    }
+            let req_count = rule.num_of_request + 1;
 
-                    if let Some(max_request) = rule.max_req {
-                        let req_count = rule.num_of_request + 1;
-                        if req_count > max_request {
-                            // Exceeds allowed request count, drop the packet
-                            return Ok(0);
-                        }
-                    }
-                    // Allow the packet
-                    return Ok(1);
+            if let Some(max_request) = rule.max_req {
+                if req_count > max_request {
+                    // Exceeds allowed request count, drop the packet
+                    // create an alert
+                    return Ok(0);
                 }
-            } else if action == 0 {
-                // Audit action, allow with alert
-                return Ok(1);
             }
+
+            // Allow the packet
+            return Ok(1);
         }
+    } else if action == 0 {
+        // Audit action, allow with alert
+        return Ok(1);
+    } else if action == 2 {
+        return Ok(1);
     }
-
     // Block action, drop the packet
     Ok(0)
 }
 
 #[inline]
-fn handle_net(hash: u64, target: NetworkTargets, direction: Option<i8>) -> Result<i32, i32> {
-    match target {
-        NetworkTargets::DNS => {
-            if let Some(dns_rule) = unsafe { KRONOS_DNS_MAP.get(&hash) } {
-                let action = dns_rule.action;
-
-                if action == 0 {
-                    if let Some(max_request) = dns_rule.max_req {
-                        let req_count = dns_rule.num_of_request + 1;
-                        if req_count > max_request {
-                            // Exceeds allowed request count, drop the packet
-                            return Ok(0);
-                        }
-                    }
-                    // Allow the packet within request limit
-                    return Ok(1);
-                }
-
-                // Deny action, drop the packet
-                return Ok(0);
-            }
+fn handle_net(hash: u64, direction: i8) -> Result<i32, i32> {
+    if let Some(rule) = unsafe { KRONOS_NETWORK_MAP.get(&hash) } {
+        if direction != rule.direction || rule.direction != 0 {
+            // This logic checks the direction is same or applied for both else it
+            // will check the net_map for any rules.
+            // Rule doesn't exists for this direction so we allow the packet
+            return Ok(1);
         }
-        NetworkTargets::UDP => {
-            if let Some(udp_rule) = unsafe { KRONOS_UDP_MAP.get(&hash) } {
-                let action = udp_rule.action;
+        let action = rule.action;
 
-                if action == 0 {
-                    if let Some(max_request) = udp_rule.max_req {
-                        let req_count = udp_rule.num_of_request + 1;
-                        if req_count > max_request {
-                            // Exceeds allowed request count, drop the packet
-                            return Ok(0);
-                        }
-                    }
-                    // Allow the packet within request limit
-                    return Ok(1);
+        if action == 0 {
+            if let Some(max_request) = rule.max_req {
+                let req_count = rule.num_of_request + 1;
+                if req_count > max_request {
+                    // Exceeds allowed request count, drop the packet
+                    return Ok(0);
                 }
-
-                // Deny action, drop the packet
-                return Ok(0);
             }
+            // Allow the packet within request limit
+            return Ok(1);
         }
-        NetworkTargets::TCP => {
-            if let Some(tcp_rule) = unsafe { KRONOS_TCP_MAP.get(&hash) } {
-                let action = tcp_rule.action;
 
-                if action == 0 {
-                    if let Some(max_request) = tcp_rule.max_req {
-                        let req_count = tcp_rule.num_of_request + 1;
-                        if req_count > max_request {
-                            // Exceeds allowed request count, drop the packet
-                            return Ok(0);
-                        }
-                    }
-                    // Allow the packet within request limit
-                    return Ok(1);
-                }
-
-                // Deny action, drop the packet
-                return Ok(0);
-            }
-        }
+        // Deny action, drop the packet
+        return Ok(0);
     }
-
-    // Default: allow packet
     Ok(1)
 }
 
@@ -499,16 +385,19 @@ pub fn lsm_file_open(ctx: LsmContext) -> i32 {
 }
 
 unsafe fn try_file_open(ctx: LsmContext) -> Result<i32, i32> {
+    // info!(&ctx, "file open called ");
     let cgroupid = unsafe { bpf_get_current_ancestor_cgroup_id(3) };
+
+    // info!(&ctx, "cgroupid {}", cgroupid);
     // pass the function if the id cant be retrieved as the return value 0 indicates thaat cgroupid can't be retrieved
     if cgroupid == 0 {
         return Ok(0);
     }
 
     if let Some(pod_bpf_map) = KRONOS_PODS.get(&cgroupid) {
-        // info!(&ctx, "cgroupid : {}", cgroupid);
+        info!(&ctx, "cgroupid : {}", cgroupid);
         let target = pod_bpf_map.target;
-        // info!(&ctx, "is file target: {}", target & 1);
+        info!(&ctx, "is file target: {}", target & 1);
         if (target & 1) != 0 {
             let file: *const vmlinux::file = unsafe { ctx.arg(0) };
 
@@ -518,11 +407,13 @@ unsafe fn try_file_open(ctx: LsmContext) -> Result<i32, i32> {
 
             let d_name = unsafe { (*(*path_ptr).dentry).d_name };
             let res = helpers::bpf_probe_read_kernel_str_bytes(d_name.name, &mut path_buf);
+
+            // info!(&ctx, "read file name from kernel");
             // let hh = helpers::bpf_d_path(, buf, sz)
             match res.ok() {
                 Some(bytes) => {
-                    // let my_str = core::str::from_utf8_unchecked(bytes);
-                    // info!(&ctx, "file name: {}", my_str);
+                    let my_str = core::str::from_utf8_unchecked(bytes);
+                    info!(&ctx, "file name: {}", my_str);
                     let hash = djb2_hash(bytes);
                     let hash = (hash as u64) ^ (pod_bpf_map.namespace_hash as u64);
                     if let Some(file) = KRONOS_FILE_MAP.get(&hash) {

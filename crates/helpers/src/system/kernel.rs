@@ -1,4 +1,5 @@
 use anyhow::{bail, Context, Ok, Result};
+use log::info;
 use std::fs;
 
 use crate::k8s_helpers::kubernetes::{self, K8sCluster};

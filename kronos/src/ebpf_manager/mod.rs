@@ -6,8 +6,8 @@ use dashmap::DashMap;
 use futures::future::join;
 use helpers::djb2_hash;
 use kronos_common::{
-    Allowrule, BinaryAllowMap, DNSAllowMap, DNSRule, FileAlert, FileMap, PodBpfMap, SourceMap,
-    TCPAllowMap, TCPRule, UDPAllowMap, UDPRule,
+    Allowrule, BinaryAllowMap, DNSAllowMap, DNSRule, FileAlert, FileMap, NRule, NetworkAllowValue,
+    NetworkRule, PodBpfMap, SourceMap, TCPAllowMap, TCPRule, UDPAllowMap, UDPRule,
 };
 
 use log::info;
@@ -45,23 +45,11 @@ impl EbpfManager {
         let kronos_binary_allow_map: ayaHash<_, u64, BinaryAllowMap> =
             ayaHash::try_from(ebpf.take_map("KRONOS_ALLOW_BINARY_MAP").unwrap()).unwrap();
 
-        let kronos_tcp_map: ayaHash<_, u64, TCPRule> =
-            ayaHash::try_from(ebpf.take_map("KRONOS_TCP_MAP").unwrap()).unwrap();
+        let kronos_network_map: ayaHash<_, u64, NRule> =
+            ayaHash::try_from(ebpf.take_map("KRONOS_NETWORK_MAP").unwrap()).unwrap();
 
-        let kronos_tcp_allow_map: ayaHash<_, u64, TCPAllowMap> =
-            ayaHash::try_from(ebpf.take_map("KRONOS_ALLOW_TCP_MAP").unwrap()).unwrap();
-
-        let kronos_udp_map: ayaHash<_, u64, UDPRule> =
-            ayaHash::try_from(ebpf.take_map("KRONOS_UDP_MAP").unwrap()).unwrap();
-
-        let kronos_udp_allow_map: ayaHash<_, u64, UDPAllowMap> =
-            ayaHash::try_from(ebpf.take_map("KRONOS_ALLOW_UDP_MAP").unwrap()).unwrap();
-
-        let kronos_dns_map: ayaHash<_, u64, DNSRule> =
-            ayaHash::try_from(ebpf.take_map("KRONOS_DNS_MAP").unwrap()).unwrap();
-
-        let kronos_dns_allow_map: ayaHash<_, u64, DNSAllowMap> =
-            ayaHash::try_from(ebpf.take_map("KRONOS_ALLOW_DNS_MAP").unwrap()).unwrap();
+        let kronos_network_allow_map: ayaHash<_, u64, NetworkAllowValue> =
+            ayaHash::try_from(ebpf.take_map("KRONOS_ALLOW_NETWORK_MAP").unwrap()).unwrap();
 
         let  kronos_pod_map: ayaHash<_, u64, PodBpfMap> =
         // KRONOS_PODS Map will contain the cgroup_id to podebpfinfo map
@@ -73,12 +61,8 @@ impl EbpfManager {
             kronos_sourcefile_map,
             kronos_binary_map,
             kronos_binary_allow_map,
-            kronos_tcp_map,
-            kronos_tcp_allow_map,
-            kronos_udp_map,
-            kronos_udp_allow_map,
-            kronos_dns_map,
-            kronos_dns_allow_map,
+            kronos_network_map,
+            kronos_network_allow_map,
         };
         let ebpf_manager_clone = self.clone();
 
@@ -98,18 +82,16 @@ impl EbpfManager {
             policy_filehash_map: HashMap<Arc<str>, Vec<u64>>,
             policy_sourcehash_map: HashMap<Arc<str>, Vec<u64>>,
             policy_binaryhash_map: HashMap<Arc<str>, Vec<u64>>,
-            policy_tcphash_map: HashMap<Arc<str>, Vec<u64>>,
-            policy_udphash_map: HashMap<Arc<str>, Vec<u64>>,
-            policy_dnshash_map: HashMap<Arc<str>, Vec<u64>>,
+            policy_network_map: HashMap<Arc<str>, Vec<u64>>,
+            policy_net: HashMap<Arc<str>, u8>,
         }
 
         let mut ebpf_cache = EbpfManager {
             policy_filehash_map: HashMap::new(),
             policy_sourcehash_map: HashMap::new(),
             policy_binaryhash_map: HashMap::new(),
-            policy_tcphash_map: HashMap::new(),
-            policy_udphash_map: HashMap::new(),
-            policy_dnshash_map: HashMap::new(),
+            policy_network_map: HashMap::new(),
+            policy_net: HashMap::new(),
         };
 
         // if the value is 1 source exists which means only the allowed binaries should need to be
@@ -119,14 +101,9 @@ impl EbpfManager {
         let mut kronos_sourcefile_map = ebpf_maps.kronos_sourcefile_map;
         let mut kronos_binary_map = ebpf_maps.kronos_binary_map;
         let mut kronos_binary_allow_map = ebpf_maps.kronos_binary_allow_map;
-        let mut kronos_tcp_map = ebpf_maps.kronos_tcp_map;
-        let mut kronos_tcp_allow_map = ebpf_maps.kronos_tcp_allow_map;
 
-        let mut kronos_udp_map = ebpf_maps.kronos_udp_map;
-        let mut kronos_udp_allow_map = ebpf_maps.kronos_udp_allow_map;
-
-        let mut kronos_dns_map = ebpf_maps.kronos_dns_map;
-        let mut kronos_dns_allow_map = ebpf_maps.kronos_dns_allow_map;
+        let mut kronos_network_map = ebpf_maps.kronos_network_map;
+        let mut kronos_network_allow_map = ebpf_maps.kronos_network_allow_map;
 
         // Take ownership of the receiver if it exists
         while let Some(policy_event) = policy_rx.recv().await {
@@ -211,13 +188,33 @@ impl EbpfManager {
                         }
                         RuleType::Binary(binaries) => {
                             let mut binary_hash_vec: Vec<u64> = Vec::new();
+
+                            for binary_name in binaries.iter() {
+                                let hash = djb2_hash(&binary_name);
+
+                                let final_hash: u64 =
+                                    (hash as u64) ^ (policy_ebpf.label_namespace_hash as u64);
+
+                                if policy_ebpf.onlyallow == 1 {
+                                    kronos_binary_allow_map.insert(
+                                        final_hash,
+                                        BinaryAllowMap::Null,
+                                        0,
+                                    )?;
+                                } else {
+                                    kronos_binary_map.insert(final_hash, 0, 0)?;
+                                }
+                                binary_hash_vec.push(final_hash);
+                            }
+
                             if policy_ebpf.onlyallow == 1 {
                                 let label_namespace_hash = policy_ebpf.label_namespace_hash as u64;
                                 match kronos_binary_allow_map.get(&label_namespace_hash, 0).ok() {
                                     Some(v) => {
                                         if let BinaryAllowMap::LNvalue(mut rule) = v {
+                                            let mut rule = rule;
+
                                             rule.count += 1;
-                                            // let value = v + 1;
                                             kronos_binary_allow_map.insert(
                                                 label_namespace_hash,
                                                 BinaryAllowMap::LNvalue(rule),
@@ -237,28 +234,6 @@ impl EbpfManager {
                                         )?;
                                     }
                                 }
-
-                                for binary_name in binaries.iter() {
-                                    let hash = djb2_hash(&binary_name);
-
-                                    let final_hash: u64 =
-                                        (hash as u64) ^ (policy_ebpf.label_namespace_hash as u64);
-                                    kronos_binary_allow_map.insert(
-                                        final_hash,
-                                        BinaryAllowMap::Null,
-                                        0,
-                                    )?;
-                                    binary_hash_vec.push(final_hash);
-                                }
-                            } else {
-                                for binary_name in binaries.iter() {
-                                    let hash = djb2_hash(&binary_name);
-
-                                    let final_hash: u64 =
-                                        (hash as u64) ^ (policy_ebpf.label_namespace_hash as u64);
-                                    kronos_binary_map.insert(final_hash, 0, 0)?;
-                                    binary_hash_vec.push(final_hash);
-                                }
                             }
 
                             ebpf_cache
@@ -266,198 +241,152 @@ impl EbpfManager {
                                 .insert(policy_ebpf.policy_uid, binary_hash_vec);
                         }
                         RuleType::Network(network_target) => {
+                            let mut network_hash_vec: Vec<u64> = Vec::new();
+                            let mut net = 0;
+                            let initial_allow_rule = Allowrule {
+                                count: 0,
+                                action: 2,
+                            };
+
+                            let mut dns_allow_rule = initial_allow_rule;
+                            let mut tcp_allow_rule = initial_allow_rule;
+                            let mut udp_allow_rule = initial_allow_rule;
+
                             if let Some(dns) = network_target.dns {
+                                net = net | 4;
                                 info!("received dns target");
-                                let dns_network_info = DNSRule {
-                                    max_req: dns.maxreq,
-                                    num_of_request: 0,
-                                    action: policy_ebpf.action,
-                                };
-                                if policy_ebpf.onlyallow == 1 {
-                                    let label_namespace_hash =
-                                        policy_ebpf.label_namespace_hash as u64;
-                                    match kronos_dns_allow_map.get(&label_namespace_hash, 0).ok() {
-                                        Some(v) => {
-                                            if let DNSAllowMap::LNvalue(mut rule) = v {
-                                                rule.count = rule.count + 1;
 
-                                                kronos_dns_allow_map.insert(
-                                                    label_namespace_hash,
-                                                    DNSAllowMap::LNvalue(rule),
-                                                    0,
-                                                )?;
-                                            }
-                                        }
-                                        None => {
-                                            let rule = Allowrule {
-                                                count: 1,
-                                                action: 1,
-                                            };
-                                            kronos_dns_allow_map.insert(
-                                                label_namespace_hash,
-                                                DNSAllowMap::LNvalue(rule),
-                                                0,
-                                            )?;
-                                        }
-                                    }
+                                for domain_name in dns.domain_names.iter() {
+                                    let hash = djb2_hash(&domain_name);
+                                    let final_hash = hash ^ policy_ebpf.label_namespace_hash;
+                                    let final_hash = final_hash as u64;
 
-                                    for domain_name in dns.domain_names.iter() {
-                                        let hash = djb2_hash(&domain_name);
-                                        let final_hash = hash ^ policy_ebpf.label_namespace_hash;
-                                        let final_hash = final_hash as u64;
-                                        kronos_dns_allow_map.insert(
+                                    let rule = NRule {
+                                        direction: 1,
+                                        max_req: dns.maxreq,
+                                        action: policy_ebpf.action,
+                                        num_of_request: 0,
+                                    };
+                                    if policy_ebpf.onlyallow == 1 {
+                                        dns_allow_rule.count = 1;
+                                        dns_allow_rule.action = policy_ebpf.action;
+                                        kronos_network_allow_map.insert(
                                             final_hash,
-                                            DNSAllowMap::Rule(dns_network_info),
+                                            NetworkAllowValue::Rule(rule),
                                             0,
                                         )?;
+                                    } else {
+                                        kronos_network_map.insert(final_hash, rule, 0);
                                     }
-                                } else {
-                                    for domain_name in dns.domain_names.iter() {
-                                        let hash = djb2_hash(domain_name);
 
-                                        let final_hash = hash ^ policy_ebpf.label_namespace_hash;
-                                        let final_hash = final_hash as u64;
-
-                                        // info!("domain:{},hash:{}", domain_name, final_hash);
-                                        kronos_dns_map.insert(final_hash, dns_network_info, 0)?;
-                                    }
+                                    network_hash_vec.push(final_hash);
                                 }
                             }
 
                             if let Some(tcp) = network_target.tcp {
+                                net = net | 2;
                                 let direction = match tcp.direction {
                                     Direction::Ingress => -1,
                                     Direction::Egress => 1,
                                     Direction::Both => 0,
                                 };
-                                let tcp_network_info = TCPRule {
-                                    direction,
+
+                                let rule = NRule {
+                                    direction: direction,
                                     max_req: tcp.maxreq,
-                                    num_of_request: 0,
                                     action: policy_ebpf.action,
+                                    num_of_request: 0,
                                 };
 
-                                if policy_ebpf.onlyallow == 1 {
-                                    let label_namespace_hash =
-                                        policy_ebpf.label_namespace_hash as u64;
-                                    match kronos_tcp_allow_map.get(&label_namespace_hash, 0).ok() {
-                                        Some(v) => {
-                                            if let TCPAllowMap::LNvalue(mut rule) = v {
-                                                rule.count = rule.count + 1;
-                                                rule.action = policy_ebpf.action;
-
-                                                kronos_tcp_allow_map.insert(
-                                                    label_namespace_hash,
-                                                    TCPAllowMap::LNvalue(rule),
-                                                    0,
-                                                )?;
-                                            }
-                                        }
-                                        None => {
-                                            let rule = Allowrule {
-                                                count: 0,
-                                                action: policy_ebpf.action,
-                                            };
-                                            kronos_tcp_allow_map.insert(
-                                                label_namespace_hash,
-                                                TCPAllowMap::LNvalue(rule),
-                                                0,
-                                            )?;
-                                        }
-                                    }
-
-                                    for port in tcp.ports.iter() {
-                                        // let hash = djb2_hash(domain_name);
-                                        let final_hash =
-                                            port.clone() as u32 ^ policy_ebpf.label_namespace_hash;
-                                        let final_hash = final_hash as u64;
-                                        kronos_tcp_allow_map.insert(
+                                for port in tcp.ports.iter() {
+                                    // let hash = djb2_hash(domain_name);
+                                    let final_hash =
+                                        port.clone() as u32 ^ policy_ebpf.label_namespace_hash;
+                                    let final_hash = final_hash as u64;
+                                    if policy_ebpf.onlyallow == 1 {
+                                        tcp_allow_rule.count = 1;
+                                        tcp_allow_rule.action = policy_ebpf.action;
+                                        kronos_network_allow_map.insert(
                                             final_hash,
-                                            TCPAllowMap::Rule(tcp_network_info),
+                                            NetworkAllowValue::Rule(rule),
                                             0,
                                         )?;
+                                    } else {
+                                        kronos_network_map.insert(final_hash, rule, 0);
                                     }
-                                } else {
-                                    for port in tcp.ports.iter() {
-                                        let hash =
-                                            port.clone() as u32 + djb2_hash(&format!("tcp{port}"));
-                                        let final_hash = policy_ebpf.label_namespace_hash ^ hash;
 
-                                        let final_hash = final_hash as u64;
-                                        kronos_tcp_map.insert(final_hash, tcp_network_info, 0)?;
-                                    }
+                                    network_hash_vec.push(final_hash);
                                 }
                             }
 
                             if let Some(udp) = network_target.udp {
+                                net = net | 1;
                                 let direction = match udp.direction {
                                     Direction::Ingress => -1,
                                     Direction::Egress => 1,
                                     Direction::Both => 0,
                                 };
-                                let udp_network_info = UDPRule {
-                                    direction,
+                                let rule = NRule {
+                                    direction: direction,
                                     max_req: udp.maxreq,
-                                    num_of_request: 0,
                                     action: policy_ebpf.action,
+                                    num_of_request: 0,
                                 };
 
-                                if policy_ebpf.onlyallow == 1 {
-                                    let label_namespace_hash =
-                                        policy_ebpf.label_namespace_hash as u64;
-                                    match kronos_tcp_allow_map.get(&label_namespace_hash, 0).ok() {
-                                        Some(v) => {
-                                            if let TCPAllowMap::LNvalue(mut rule) = v {
-                                                rule.count = rule.count + 1;
-                                                rule.action = policy_ebpf.action;
-
-                                                kronos_tcp_allow_map.insert(
-                                                    label_namespace_hash,
-                                                    TCPAllowMap::LNvalue(rule),
-                                                    0,
-                                                )?;
-                                            }
-                                        }
-                                        None => {
-                                            let rule = Allowrule {
-                                                count: 1,
-                                                action: policy_ebpf.action,
-                                            };
-                                            kronos_tcp_allow_map.insert(
-                                                label_namespace_hash,
-                                                TCPAllowMap::LNvalue(rule),
-                                                0,
-                                            )?;
-                                        }
-                                    }
-
-                                    for port in udp.ports.iter() {
-                                        // let hash = djb2_hash(domain_name);
-                                        let final_hash =
-                                            port.clone() as u32 ^ policy_ebpf.label_namespace_hash;
-                                        let final_hash = final_hash as u64;
-                                        kronos_udp_allow_map.insert(
+                                for port in udp.ports.iter() {
+                                    // let hash = djb2_hash(domain_name);
+                                    let final_hash =
+                                        port.clone() as u32 ^ policy_ebpf.label_namespace_hash;
+                                    let final_hash = final_hash as u64;
+                                    if policy_ebpf.onlyallow == 1 {
+                                        tcp_allow_rule.count = 1;
+                                        tcp_allow_rule.action = policy_ebpf.action;
+                                        kronos_network_allow_map.insert(
                                             final_hash,
-                                            UDPAllowMap::Rule(udp_network_info),
+                                            NetworkAllowValue::Rule(rule),
                                             0,
                                         )?;
+                                    } else {
+                                        kronos_network_map.insert(final_hash, rule, 0);
                                     }
-                                } else {
-                                    for port in udp.ports.iter() {
-                                        let hash = port.clone() as u32;
-                                        let final_hash = hash ^ policy_ebpf.label_namespace_hash;
 
-                                        let final_hash = final_hash as u64;
-                                        kronos_udp_map.insert(final_hash, udp_network_info, 0)?;
-                                    }
+                                    network_hash_vec.push(final_hash);
                                 }
                             }
+
+                            if policy_ebpf.onlyallow == 1 {
+                                let label_namespace_hash = policy_ebpf.label_namespace_hash as u64;
+                                match kronos_network_allow_map.get(&label_namespace_hash, 0).ok() {
+                                    Some(x) => {
+                                        if let NetworkAllowValue::LNValue { dns, udp, tcp } = x {
+                                            dns_allow_rule.count += dns.count;
+                                            tcp_allow_rule.count += tcp.count;
+                                            udp_allow_rule.count += udp.count;
+                                        }
+                                    }
+                                    None => {}
+                                }
+
+                                let mut lnvalue = NetworkAllowValue::LNValue {
+                                    dns: dns_allow_rule,
+                                    udp: tcp_allow_rule,
+                                    tcp: udp_allow_rule,
+                                };
+                                kronos_network_allow_map.insert(label_namespace_hash, lnvalue, 0);
+                            }
+                            ebpf_cache
+                                .policy_net
+                                .insert(policy_ebpf.policy_uid.clone(), net);
+
+                            ebpf_cache
+                                .policy_network_map
+                                .insert(policy_ebpf.policy_uid, network_hash_vec);
                         }
                         _ => {}
                     }
                 }
                 PolicyBpfEvent::Delete(policy_remove_info) => {
-                    // delete filehash from KRONOS_FILE_MAP
+                    // DELETE file related info from ebpf map and cache
                     let policy_id = policy_remove_info.policy_id;
                     info!("policy bpf event called with policy id:{policy_id}");
                     if let Some(file_hash_vec) = ebpf_cache.policy_filehash_map.remove(&policy_id) {
@@ -467,7 +396,7 @@ impl EbpfManager {
                         }
                     }
 
-                    // delete source hash from KRONOS_SOURCE_MAP
+                    // DELETE source related info from ebpf map and cache
 
                     if let Some(source_hash_vec) =
                         ebpf_cache.policy_sourcehash_map.remove(&policy_id)
@@ -478,7 +407,7 @@ impl EbpfManager {
                         }
                     }
 
-                    // delete binary hash from KRONOS_BINARY_MAP
+                    // DELETE Binary related info from ebpf map and cache
 
                     if let Some(binary_hash_vec) =
                         ebpf_cache.policy_binaryhash_map.remove(&policy_id)
@@ -498,13 +427,72 @@ impl EbpfManager {
                             match kronos_binary_allow_map.get(&label_namespace_hash, 0).ok() {
                                 Some(v) => {
                                     if let BinaryAllowMap::LNvalue(mut rule) = v {
-                                        rule.count -= 1;
+                                        // rule.count -= 1;
+                                        let arule = Allowrule {
+                                            count: rule.count - 1,
+                                            action: rule.action,
+                                        };
                                         // let value = v + 1;
                                         kronos_binary_allow_map.insert(
                                             label_namespace_hash,
-                                            BinaryAllowMap::LNvalue(rule),
+                                            BinaryAllowMap::LNvalue(arule),
                                             0,
                                         )?;
+                                    }
+                                    // kronos_binary_allow_map.insert(label_namespace_hash, value, 0);
+                                }
+                                None => {}
+                            }
+                        }
+                    }
+
+                    // DELETE Network related info from ebpf map and cache
+                    if let Some(network_hash_vec) = ebpf_cache.policy_network_map.remove(&policy_id)
+                    {
+                        let mut net = 0;
+
+                        if let Some(network) = ebpf_cache.policy_net.remove(&policy_id) {
+                            net = network;
+                        }
+                        for net_hash in network_hash_vec.iter() {
+                            info!("removing source hash:{net_hash}");
+                            if policy_remove_info.onlyallow == true {
+                                kronos_network_allow_map.remove(net_hash)?;
+                            } else {
+                                kronos_network_map.remove(net_hash)?;
+                            }
+                        }
+                        let mut net = 0;
+                        for label_namespace_hash in
+                            policy_remove_info.label_namespace_hash_vec.iter()
+                        {
+                            let label_namespace_hash = label_namespace_hash.clone() as u64;
+                            match kronos_network_allow_map.get(&label_namespace_hash, 0).ok() {
+                                Some(v) => {
+                                    if let NetworkAllowValue::LNValue { dns, udp, tcp } = v {
+                                        let mut udp_rule = udp;
+                                        let mut tcp_rule = tcp;
+                                        let mut dns_rule = dns;
+                                        if net & 1 != 0 {
+                                            udp_rule.count = udp_rule.count - 1;
+                                        }
+
+                                        if net & 2 != 0 {
+                                            tcp_rule.count = tcp_rule.count - 1;
+                                        }
+
+                                        if net & 4 != 0 {
+                                            dns_rule.count = dns_rule.count - 1;
+                                        }
+                                        kronos_network_allow_map.insert(
+                                            label_namespace_hash,
+                                            NetworkAllowValue::LNValue {
+                                                dns: dns_rule,
+                                                udp: udp_rule,
+                                                tcp: tcp_rule,
+                                            },
+                                            0,
+                                        );
                                     }
                                     // kronos_binary_allow_map.insert(label_namespace_hash, value, 0);
                                 }

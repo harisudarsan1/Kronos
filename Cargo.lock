@@ -1090,13 +1090,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "kronosbpf-common"
-version = "0.1.0"
-dependencies = [
- "aya",
-]
-
-[[package]]
 name = "kube"
 version = "0.95.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2179,7 +2172,6 @@ dependencies = [
  "aya",
  "k8s-openapi",
  "kronos-common",
- "kronosbpf-common",
  "kube",
  "procfs",
  "schemars",

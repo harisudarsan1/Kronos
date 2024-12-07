@@ -1,0 +1,54 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: kronos
+  namespace: ns1
+  labels:
+    app: kronos
+spec:
+  selector:
+    matchLabels:
+      app: kronos
+  template:
+    metadata:
+      labels:
+        app: kronos
+    spec:
+      hostNetwork: true
+      containers:
+      - name: kronos
+        image: docker.io/harisudarsan/kronos:l1
+        securityContext:
+          privileged: true
+          capabilities:
+            add:
+            - SETUID
+            - SETGID
+            - SETPCAP
+            - SYS_ADMIN
+            - SYS_PTRACE
+            - MAC_ADMIN
+            - SYS_RESOURCE
+            - IPC_LOCK
+            - CAP_DAC_OVERRIDE
+            - CAP_DAC_READ_SEARCH
+        # args: ["-i", "eth0"]
+        env:
+        - name: RUST_LOG
+          value: info
+        imagePullPolicy: IfNotPresent
+        startupProbe:
+          grpc:
+            port: 9874
+          failureThreshold: 30
+          periodSeconds: 10
+        livenessProbe:
+          grpc:
+            port: 9874
+          initialDelaySeconds: 5
+          periodSeconds: 5
+        readinessProbe:
+          grpc:
+            port: 9874
+          initialDelaySeconds: 5
+          periodSeconds: 5

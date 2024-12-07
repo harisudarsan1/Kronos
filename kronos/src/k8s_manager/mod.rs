@@ -229,8 +229,11 @@ impl K8sManager {
 
         let namespace_hash = djb2_hash(&pod.namespace);
 
-        let pod_cid = unsafe { kernel::get_cgroup_id(pod_cgroup_path) };
-        info!("pod cgroupid: {}", pod_cid);
+        let pod_cid = unsafe { kernel::get_cgroup_id(pod_cgroup_path.clone()) };
+        info!(
+            "pod cgroupid: {} for cgroup path{}",
+            pod_cid, pod_cgroup_path
+        );
 
         let (send, recv) = oneshot::channel();
         self.target_cache_tx.try_send(TargetCache::GetTarget {
@@ -246,7 +249,7 @@ impl K8sManager {
             let pod_ebpf_event = PodEbpfEvent::Add {
                 poduid: poduid.clone(),
                 pod_cid: pod_cid,
-                namespace_hash: namespace_hash,
+                namespace_hash: pod.label_namespace_hash,
                 target: target,
             };
 

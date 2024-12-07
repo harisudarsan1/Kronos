@@ -68,24 +68,49 @@ unsafe impl aya::Pod for SourceMap {}
 
 // #[derive(Copy, Clone, Debug)]
 // #[repr(C)]
-// pub enum NetworkInfo {
-//     TCP {
-//         direction: i8,
-//         max_req: Option<u32>,
-//         num_of_request: u32,
-//     },
-//     UDP {
-//         direction: i8,
-//         max_req: Option<u32>,
-//
-//         num_of_request: u32,
-//     },
-//     DNS {
-//         max_req: Option<u32>,
-//
-//         num_of_request: u32,
-//     },
+// pub struct NetworkRule {
+//     pub dns: NRule,
+//     pub udp: NRule,
+//     pub tcp: NRule,
 // }
+
+#[derive(Copy, Clone, Debug)]
+#[repr(C)]
+pub struct NetworkRule {
+    pub dns: NRule,
+    pub udp: NRule,
+    pub tcp: NRule,
+}
+
+#[cfg(feature = "user")]
+unsafe impl aya::Pod for NetworkRule {}
+
+#[derive(Copy, Clone, Debug)]
+#[repr(C)]
+pub struct NRule {
+    pub direction: i8,
+    pub max_req: Option<u32>,
+
+    pub num_of_request: u32,
+    pub action: u8,
+}
+
+#[cfg(feature = "user")]
+unsafe impl aya::Pod for NRule {}
+
+#[derive(Copy, Clone, Debug)]
+#[repr(C)]
+pub enum NetworkAllowValue {
+    LNValue {
+        dns: Allowrule,
+        udp: Allowrule,
+        tcp: Allowrule,
+    },
+    Rule(NRule),
+}
+
+#[cfg(feature = "user")]
+unsafe impl aya::Pod for NetworkAllowValue {}
 
 #[derive(Copy, Clone, Debug)]
 #[repr(C)]
