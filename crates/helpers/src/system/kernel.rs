@@ -1,5 +1,5 @@
 use anyhow::{bail, Context, Ok, Result};
-use log::info;
+use log::{error, info};
 use std::fs;
 
 use crate::k8s_helpers::kubernetes::{self, K8sCluster};
@@ -36,8 +36,8 @@ pub fn check_btf_support() -> Result<bool> {
     todo!()
 }
 
-// This is the cgroup path for kubeadm and k3s using containerd
-// sys/fs/cgroup/unified/kubepods.slice/kubepods-besteffort.slice/kubepods-besteffort-pod2fab4eb9_0c15_41e1_99a7_fc96cf7451aa.slice
+// TODO: This is temporary need to get the cgroup driver and determine the cgroup path based on the
+// cgroup driver and the container configuration
 pub fn get_container_cgroup_path(
     pod_id: &str,
     qos_class: &str,
@@ -74,6 +74,9 @@ pub fn get_container_cgroup_path(
         }
     }
 }
+
+// TODO: This is temporary need to get the cgroup driver and determine the cgroup path based on the
+// cgroup driver
 
 pub fn get_pod_cgroup_path(pod_id: &str, qos_class: &str, cluster: K8sCluster) -> String {
     match cluster {
@@ -138,7 +141,7 @@ pub unsafe fn get_cgroup_id(cgroup_path: String) -> u64 {
     if name_to_handle_at(libc::AT_FDCWD, c_path.as_ptr(), fhp, &mut mount_id, flags) != -1
         || *libc::__errno_location() != libc::EOVERFLOW
     {
-        eprintln!("Unexpected result from name_to_handle_at()");
+        error!("Unexpected result from name_to_handle_at()");
         libc::free(fhp as *mut libc::c_void);
         std::process::exit(1);
     }
@@ -153,7 +156,7 @@ pub unsafe fn get_cgroup_id(cgroup_path: String) -> u64 {
 
     // Second call to get the file handle
     if name_to_handle_at(libc::AT_FDCWD, c_path.as_ptr(), fhp, &mut mount_id, flags) == -1 {
-        eprintln!("Error calling name_to_handle_at");
+        error!("Error calling name_to_handle_at");
         libc::free(fhp as *mut libc::c_void);
         std::process::exit(1);
     }

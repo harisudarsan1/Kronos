@@ -162,14 +162,6 @@ pub struct KronosPolicyEbpfMaps {
 
     pub kronos_network_map: ayaHash<MapData, u64, NRule>,
     pub kronos_network_allow_map: ayaHash<MapData, u64, NetworkAllowValue>,
-    // pub kronos_tcp_map: ayaHash<MapData, u64, TCPRule>,
-    // pub kronos_tcp_allow_map: ayaHash<MapData, u64, TCPAllowMap>,
-    //
-    // pub kronos_udp_map: ayaHash<MapData, u64, UDPRule>,
-    // pub kronos_udp_allow_map: ayaHash<MapData, u64, UDPAllowMap>,
-    //
-    // pub kronos_dns_map: ayaHash<MapData, u64, DNSRule>,
-    // pub kronos_dns_allow_map: ayaHash<MapData, u64, DNSAllowMap>,
 }
 
 pub struct KronosPodEbpfMaps {
