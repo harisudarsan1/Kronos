@@ -1,32 +1,12 @@
-# lsm-nice
+kronos
+Prerequisites
+Install bpf-linker: cargo install bpf-linker
+Build & Run
+Use cargo build, cargo check, etc. as normal. Run your program with xtask run.
 
-## Prerequisites
+Cargo build scripts are used to automatically build the eBPF correctly and include it in the program. When not using xtask run, eBPF code generation is skipped for a faster developer experience; this compromise necessitates the use of xtask to actually build the eBPF.
 
-1. Install bpf-linker: `cargo install bpf-linker`
+Environment: 
+- Kronos uses BPF-LSM for enforcing MAC at runtime so the kernel should have support for BPF as well as BPF-LSM. Kronos currently supports cgroupfs as cgroupdriver for kubernetes so set - 
+- cgroupfs as cgroup driver in your cluster. Kronos deployment artifacts can be found in the config directory.
 
-## Build eBPF
-
-```bash
-cargo xtask build-ebpf
-```
-
-To perform a release build you can use the `--release` flag.
-You may also change the target architecture with the `--target` flag.
-
-## Build Userspace
-
-```bash
-cargo build
-```
-
-## Build eBPF and Userspace
-
-```bash
-cargo xtask build
-```
-
-## Run
-
-```bash
-RUST_LOG=info cargo xtask run
-```
