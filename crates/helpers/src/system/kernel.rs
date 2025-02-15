@@ -1,6 +1,9 @@
 use anyhow::{bail, Context, Ok, Result};
 use log::{error, info};
+use regex::Regex;
 use std::fs;
+use std::io::{self, BufRead};
+use std::path::Path;
 
 use crate::k8s_helpers::kubernetes::{self, K8sCluster};
 use std::os::unix::ffi::OsStrExt;
@@ -13,6 +16,19 @@ use std::{
 /// and parses it to the kernel version
 pub fn get_kernel_version() -> Result<String> {
     todo!()
+}
+
+pub enum CgroupDriver {
+    SystemdUnified,
+    SystemdLegacy,
+    SystemdHybrid,
+    CgroupFS,
+}
+pub enum SystemdCgroupMode {
+    Unified,
+    Legacy,
+    Hybrid,
+    Undefined,
 }
 
 pub fn is_bpflsm_enabled() -> Result<bool> {
@@ -47,8 +63,8 @@ pub fn get_container_cgroup_path(
     match cluster {
         K8sCluster::K3s => {
             format!(
-                "/sys/fs/cgroup/kubepods.slice/{}pod{}/{}",
-                qos_class, pod_id, container_id
+                "/sys/fs/cgroup/kubepods.slice/kubepods-{}.slice/kubepods-{}-pod{}.slice/cri-containerd-{}.scope",
+                qos_class,qos_class, pod_id, container_id
             )
         }
         K8sCluster::Minikube => {
@@ -96,6 +112,32 @@ pub fn get_pod_cgroup_path(pod_id: &str, qos_class: &str, cluster: K8sCluster) -
             format!("")
         }
     }
+}
+
+pub fn get_cg_path(pod_id: &str, qos_class: &str, cluster: K8sCluster) -> String {
+    todo!()
+}
+
+fn get_kubelet_cgroup_driver() -> Option<CgroupDriver> {
+    let path = "/var/lib/kubelet/config.yaml";
+
+    // Read file line by line
+    let file = fs::File::open(path).unwrap();
+    let reader = io::BufReader::new(file);
+
+    // Define regex to match `cgroupDriver`
+    let re = Regex::new(r"cgroupDriver:\s*(\S+)").unwrap();
+    for line in reader.lines() {
+        let line = line.unwrap();
+        if let Some(caps) = re.captures(&line) {
+            println!("Found cgroup driver: {}", &caps[1]);
+            return None;
+        }
+    }
+    return None;
+}
+fn get_systemd_cgroup_mode() -> SystemdCgroupMode {
+    return SystemdCgroupMode::Undefined;
 }
 
 //TODO: modify this function in Rust way

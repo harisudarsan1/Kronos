@@ -71,7 +71,7 @@ RUN --mount=type=cache,target=/workspace/target/ \
 FROM alpine
 
 # Metadata
-LABEL org.opencontainers.image.source="https://github.com/HARI-124/kronos"
+LABEL org.opencontainers.image.source="https://github.com/HARI-124/Kronos"
 LABEL org.opencontainers.image.licenses="APACHE:2.0"
 
 # Working directory and copy binary

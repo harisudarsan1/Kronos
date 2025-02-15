@@ -8,3 +8,4 @@ procfs = { version = "0.17.0", default-features = false }
 anyhow = "1"
 libc = "0.2"
 log = "0.4"
+regex = "1.11.1"

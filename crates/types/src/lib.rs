@@ -11,8 +11,7 @@ use aya::{
 };
 
 use kronos_common::{
-    BinaryAllowMap, DNSAllowMap, DNSRule, FileAlert, FileMap, NRule, NetworkAllowValue,
-    NetworkRule, PodBpfMap, SourceMap, TCPAllowMap, TCPRule, UDPAllowMap, UDPRule,
+    BinaryAllowMap, FileAlert, FileMap, NRule, NetworkAllowValue, NetworkRule, PodBpfMap, SourceMap,
 };
 
 pub mod CRD;

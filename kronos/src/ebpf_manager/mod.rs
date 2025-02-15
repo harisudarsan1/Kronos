@@ -6,8 +6,8 @@ use dashmap::DashMap;
 use futures::future::join;
 use helpers::djb2_hash;
 use kronos_common::{
-    Allowrule, BinaryAllowMap, DNSAllowMap, DNSRule, FileAlert, FileMap, NRule, NetworkAllowValue,
-    NetworkRule, PodBpfMap, SourceMap, TCPAllowMap, TCPRule, UDPAllowMap, UDPRule,
+    Allowrule, BinaryAllowMap, FileAlert, FileMap, NRule, NetworkAllowValue, NetworkRule,
+    PodBpfMap, SourceMap,
 };
 
 use log::info;
@@ -462,7 +462,6 @@ impl EbpfManager {
                                 kronos_network_map.remove(net_hash)?;
                             }
                         }
-                        let mut net = 0;
                         for label_namespace_hash in
                             policy_remove_info.label_namespace_hash_vec.iter()
                         {

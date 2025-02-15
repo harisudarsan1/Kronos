@@ -20,8 +20,7 @@ use kronos_ebpf::{
 };
 
 use kronos_common::{
-    BinaryAllowMap, BinaryMap, DNSAllowMap, DNSRule, FileMap, NRule, NetworkAllowValue,
-    NetworkRule, PodBpfMap, TCPAllowMap, TCPRule, UDPAllowMap, UDPRule,
+    BinaryAllowMap, BinaryMap, FileMap, NRule, NetworkAllowValue, NetworkRule, PodBpfMap,
 };
 
 use network_types::{
