@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: DaemonSet
 metadata:
   name: kronos
-  namespace: ns1
+  namespace: default
   labels:
     app: kronos
 spec:

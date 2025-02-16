@@ -39,11 +39,11 @@ pub async fn load_bpf_programs() -> Result<Bpf> {
         warn!("failed to initialize eBPF logger: {}", e);
     }
     let btf = Btf::from_sys_fs()?;
-    let program: &mut Lsm = bpf.program_mut("lsm_file_open").unwrap().try_into()?;
-    program.load("file_open", &btf)?;
-    program.attach()?;
+    // let program: &mut Lsm = bpf.program_mut("lsm_file_open").unwrap().try_into()?;
+    // program.load("file_open", &btf)?;
+    // program.attach()?;
 
-    let cgroup_path = String::from("/sys/fs/cgroup/kubepods");
+    let cgroup_path = String::from("/sys/fs/cgroup/kubepods.slice");
     let cgroup = std::fs::File::open(&cgroup_path).with_context(|| format!("{}", cgroup_path))?;
     let program: &mut CgroupSkb = bpf.program_mut("cskb").unwrap().try_into()?;
     program.load()?;

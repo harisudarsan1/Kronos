@@ -298,7 +298,7 @@ impl K8sManager {
                 &pod_uid,
                 &qos_class,
                 &container.container_id.clone(),
-                kubernetes::K8sCluster::Microk8s,
+                kubernetes::K8sCluster::K3s,
             );
             let cgroup_id = unsafe { kernel::get_cgroup_id(cgroup_path) };
 

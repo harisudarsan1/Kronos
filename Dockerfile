@@ -14,6 +14,8 @@ RUN apt-get update && apt-get install --yes \
     clang \
     wget \
     lsb-release \
+    bpftool \
+    # libbpf \
     software-properties-common \
     gnupg && \
     wget -O /tmp/llvm.sh https://apt.llvm.org/llvm.sh && \
@@ -53,6 +55,11 @@ ENV AR_aarch64_unknown_linux_musl="/usr/lib/llvm-$LLVM_VERSION/bin/llvm-ar"
 ENV CC_x86_64_unknown_linux_musl="/usr/lib/llvm-$LLVM_VERSION/bin/clang"
 ENV AR_x86_64_unknown_linux_musl="/usr/lib/llvm-$LLVM_VERSION/bin/llvm-ar"
 ENV CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_RUSTFLAGS="-Clink-self-contained=yes -Clinker=rust-lld"
+
+
+RUN cargo install bindgen-cli
+RUN cargo install --git https://github.com/aya-rs/aya -- aya-tool
+RUN aya-tool generate task_struct > /workspace/kronos-ebpf/src/vmlinux.rs
 
 RUN --mount=type=cache,target=/workspace/target/ \
     --mount=type=cache,target=/root/.cargo/registry \
