@@ -17,7 +17,8 @@ async fn main() -> Result<()> {
     // Load and attach the eBPF program
     info!("Loading BPF programs...");
     // kronos_daemon::start_daemon().await;
-    k_daemon::start_daemon().await;
+    // k_daemon::start_daemon().await;
+    ebpf_manager::bpfloader::load_bpf_programs();
 
     Ok(())
 }

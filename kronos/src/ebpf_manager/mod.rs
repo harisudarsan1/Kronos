@@ -1,5 +1,5 @@
 // use crate::bpfloader::load_bpf_programs;
-mod bpfloader;
+pub mod bpfloader;
 use aya::{maps::HashMap as ayaHash, Bpf};
 use bpfloader::load_bpf_programs;
 use dashmap::DashMap;
