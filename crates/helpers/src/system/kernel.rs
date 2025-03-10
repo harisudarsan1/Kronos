@@ -12,6 +12,7 @@ use std::{
     mem, ptr, slice,
 };
 
+pub const CGROUPFS_PATH: &str = "/sys/fs/cgroup";
 /// get_kernel_version retrieves the kernel version from the /proc/version file
 /// and parses it to the kernel version
 pub fn get_kernel_version() -> Result<String> {
@@ -23,12 +24,18 @@ pub enum CgroupDriver {
     SystemdLegacy,
     SystemdHybrid,
     CgroupFS,
+    Unknown,
 }
 pub enum SystemdCgroupMode {
     Unified,
     Legacy,
     Hybrid,
     Undefined,
+}
+pub enum ContainerRuntime {
+    Docker,
+    Containerd,
+    CriO,
 }
 
 pub fn is_bpflsm_enabled() -> Result<bool> {
@@ -54,61 +61,93 @@ pub fn check_btf_support() -> Result<bool> {
 
 // TODO: This is temporary need to get the cgroup driver and determine the cgroup path based on the
 // cgroup driver and the container configuration
+// pub fn get_container_cgroup_path(
+//     pod_id: &str,
+//     qos_class: &str,
+//     container_id: &str,
+//     cluster: K8sCluster,
+// ) -> String {
+//     match cluster {
+//         K8sCluster::K3s => {
+//             format!(
+//                 "/sys/fs/cgroup/kubepods.slice/kubepods-{}.slice/kubepods-{}-pod{}.slice/cri-containerd-{}.scope",
+//                 qos_class,qos_class, pod_id, container_id
+//             )
+//         }
+//         K8sCluster::Minikube => {
+//             format!(
+//                 "/sys/fs/cgroup/kubepods/{}/pod{}/{}",
+//                 qos_class, pod_id, container_id
+//             )
+//         }
+//         K8sCluster::KubeAdm => {
+//             format!(
+//                 "/sys/fs/cgroup/kubepods.slice/{}pod{}/{}",
+//                 qos_class, pod_id, container_id
+//             )
+//         }
+//         K8sCluster::Microk8s => {
+//             format!(
+//                 "/sys/fs/cgroup/kubepods/{}/pod{}/{}",
+//                 qos_class, pod_id, container_id
+//             )
+//         }
+//         K8sCluster::Kind => {
+//             format!("")
+//         }
+//     }
+// }
+
 pub fn get_container_cgroup_path(
     pod_id: &str,
     qos_class: &str,
     container_id: &str,
-    cluster: K8sCluster,
+    container_runtime: &str,
+    cg_driver: &CgroupDriver,
 ) -> String {
-    match cluster {
-        K8sCluster::K3s => {
+    match cg_driver {
+        CgroupDriver::CgroupFS => {
             format!(
-                "/sys/fs/cgroup/kubepods.slice/kubepods-{}.slice/kubepods-{}-pod{}.slice/cri-containerd-{}.scope",
-                qos_class,qos_class, pod_id, container_id
+                "{}/kubepods/{}/pod{}/{}",
+                CGROUPFS_PATH, qos_class, pod_id, container_id
             )
         }
-        K8sCluster::Minikube => {
+        CgroupDriver::SystemdUnified => {
             format!(
-                "/sys/fs/cgroup/kubepods/{}/pod{}/{}",
-                qos_class, pod_id, container_id
+                "{}/unified/kubepods.slice/kubepods-{}.slice/kubepods-{}-pod{}.slice/cri-{}-{}.scope",
+                CGROUPFS_PATH, qos_class, qos_class, pod_id, container_runtime, container_id
             )
         }
-        K8sCluster::KubeAdm => {
+        CgroupDriver::SystemdHybrid => {
             format!(
-                "/sys/fs/cgroup/kubepods.slice/{}pod{}/{}",
-                qos_class, pod_id, container_id
+                "{}/kubepods.slice/kubepods-{}.slice/kubepods-{}-pod{}.slice/cri-{}-{}.scope",
+                CGROUPFS_PATH, qos_class, qos_class, pod_id, container_runtime, container_id
             )
         }
-        K8sCluster::Microk8s => {
-            format!(
-                "/sys/fs/cgroup/kubepods/{}/pod{}/{}",
-                qos_class, pod_id, container_id
-            )
-        }
-        K8sCluster::Kind => {
+        _ => {
             format!("")
         }
     }
 }
 
-// TODO: This is temporary need to get the cgroup driver and determine the cgroup path based on the
-// cgroup driver
-
-pub fn get_pod_cgroup_path(pod_id: &str, qos_class: &str, cluster: K8sCluster) -> String {
-    match cluster {
-        K8sCluster::K3s => {
-            format!("/sys/fs/cgroup/kubepods.slice/{}pod{}", qos_class, pod_id)
+pub fn get_pod_cgroup_path(pod_id: &str, qos_class: &str, cg_driver: &CgroupDriver) -> String {
+    match cg_driver {
+        CgroupDriver::CgroupFS => {
+            format!("{}/kubepods/{}/pod{}", CGROUPFS_PATH, qos_class, pod_id)
         }
-        K8sCluster::Minikube => {
-            format!("/sys/fs/cgroup/kubepods/{}/pod{}", qos_class, pod_id)
+        CgroupDriver::SystemdUnified => {
+            format!(
+                "{}/unified/kubepods.slice/kubepods-{}.slice/kubepods-{}-pod{}.slice",
+                CGROUPFS_PATH, qos_class, qos_class, pod_id
+            )
         }
-        K8sCluster::KubeAdm => {
-            format!("/sys/fs/cgroup/kubepods.slice/{}pod{}", qos_class, pod_id)
+        CgroupDriver::SystemdHybrid => {
+            format!(
+                "{}/kubepods.slice/kubepods-{}.slice/kubepods-{}-pod{}.slice",
+                CGROUPFS_PATH, qos_class, qos_class, pod_id
+            )
         }
-        K8sCluster::Microk8s => {
-            format!("/sys/fs/cgroup/kubepods/{}/pod{}", qos_class, pod_id)
-        }
-        K8sCluster::Kind => {
+        _ => {
             format!("")
         }
     }
@@ -136,12 +175,42 @@ fn get_kubelet_cgroup_driver() -> Option<CgroupDriver> {
     }
     return None;
 }
-fn get_systemd_cgroup_mode() -> SystemdCgroupMode {
-    return SystemdCgroupMode::Undefined;
+
+pub fn get_cgroup_driver(path: String, is_unified: bool) -> Result<CgroupDriver> {
+    let path = Path::new(&path);
+    if path.is_dir() {
+        for entry in fs::read_dir(path)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.is_dir() {
+                let dir_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                if dir_name.starts_with("kubepods") {
+                    println!("Processing directory (starts with kubepods): {:?}", path);
+                    if is_unified {
+                        println!("systemdunified driver");
+                        return Ok(CgroupDriver::SystemdUnified);
+                    }
+                    if dir_name.ends_with("slice") {
+                        println!("systemdhybrid driver");
+                        return Ok(CgroupDriver::SystemdHybrid);
+                    } else {
+                        println!("cgroupfs driver");
+                        return Ok(CgroupDriver::CgroupFS);
+                    }
+                } else if dir_name == "unified" {
+                    println!("Processing directory (named unified): {:?}", path);
+                    let new_path = format!("{}/unified", CGROUPFS_PATH);
+                    get_cgroup_driver(new_path, true)?;
+                }
+            }
+        }
+    }
+    Ok(CgroupDriver::Unknown)
 }
 
 //TODO: modify this function in Rust way
 pub unsafe fn get_cgroup_id(cgroup_path: String) -> u64 {
+    info!("received cgroup path:{}", cgroup_path);
     #[repr(C)]
     struct file_handle {
         handle_bytes: u32,

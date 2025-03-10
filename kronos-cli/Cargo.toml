@@ -1,0 +1,15 @@
+[package]
+name = "kronos-cli"
+version = "0.1.0"
+description = "CLI tool for interacting and managing Kronos"
+authors=["harisudarsan1"]
+edition = "2021"
+
+[dependencies]
+helpers = {path = "../crates/helpers"}
+types = {path = "../crates/types"}
+anyhow = "1"
+clap = { version = "4.5.19", features = ["std","derive"] }
+kube = { version = "0.95.0", features = ["runtime", "derive"] }
+tokio = { version = "1.25", features = ["macros", "rt", "rt-multi-thread", "net", "signal"] }
+k8s-openapi = {version="0.23.0",features=["latest"]}

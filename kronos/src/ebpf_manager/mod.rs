@@ -125,10 +125,10 @@ impl EbpfManager {
                             let mut file_hash_vec: Vec<u64> = vec![];
                             let mut source_hash_vec: Vec<u64> = vec![];
 
-                            let is_file = 0;
+                            let is_file = 1;
                             match sources {
                                 Some(sources) => {
-                                    let is_file = 1;
+                                    let is_file = 2;
 
                                     for file in filenames.iter() {
                                         info!("file name:{file}");
@@ -166,6 +166,7 @@ impl EbpfManager {
                                         let hash = djb2_hash(file);
                                         let final_hash: u64 = (hash as u64)
                                             ^ (policy_ebpf.label_namespace_hash as u64);
+                                        info!("file_hash:{}", final_hash);
                                         file_hash_vec.push(final_hash);
                                         let file_map = FileMap {
                                             is_file,

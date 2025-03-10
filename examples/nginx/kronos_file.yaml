@@ -1,0 +1,25 @@
+apiVersion: kronos.io/v1alpha1
+kind: KronosSecurityPolicy
+metadata:
+  name: nginx-file-policy
+  namespace: ns1
+spec:
+  severity: 3
+  tags:
+    - "nginx"
+    - "file-access"
+  message: "Restrict access to sensitive files"
+  onlyAllow: false
+  targets:
+    file:
+      isOwner: true
+      values:
+        - "nginx.conf"
+        - "/etc/nginx/conf.d/"
+      # source:
+      #   - "/usr/sbin/nginx"
+  selectors:
+    matchLabels:
+      - "app=nginx"
+    namespace: "ns1"
+  action: block

@@ -4,6 +4,7 @@ use crate::cache_manager::{
 };
 use crate::ebpf_manager::EbpfManager;
 use crate::k8s_manager::{ChannelSender, K8sManager};
+use crate::kernel::*;
 use futures::join;
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -46,9 +47,12 @@ pub async fn start_daemon() {
         ebpf_pod_sender: ebpf_pod_tx,
     };
     tokio::spawn(async move {
-        let k8s_manager = Arc::new(K8sManager::new(channel_sender));
+        let cg_driver = get_cgroup_driver(CGROUPFS_PATH.to_string(), false).unwrap();
+        let k8s_manager = Arc::new(K8sManager::new(channel_sender, cg_driver));
         k8s_manager.k8s_manager().await;
     });
     let ebpf_manager = Arc::new(EbpfManager::new());
     ebpf_manager.ebpf_manager(ebpf_policy_rx, ebpf_pod_rx).await;
 }
+
+// TODO: Add a graceful shutdown for certain events like unsupported cgroup drivers, etc

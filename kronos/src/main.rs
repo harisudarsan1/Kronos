@@ -1,4 +1,7 @@
+use std::path::Path;
+
 use anyhow::{Context, Ok, Result};
+use helpers::system::kernel;
 // use helpers::k8s_helpers::{kubernetes, runtime};
 use log::{debug, info, warn};
 use tokio::signal;
@@ -17,8 +20,10 @@ async fn main() -> Result<()> {
     // Load and attach the eBPF program
     info!("Loading BPF programs...");
     // kronos_daemon::start_daemon().await;
-    // k_daemon::start_daemon().await;
-    ebpf_manager::bpfloader::load_bpf_programs();
+    k_daemon::start_daemon().await;
+
+    // ebpf_manager::bpfloader::load_bpf_programs();
+    // loop {}
 
     Ok(())
 }

@@ -55,6 +55,7 @@ static KRONOS_PODS: HashMap<u64, PodBpfMap> = HashMap::with_max_entries(1024, 0)
 /*
 maps for File target
  */
+// TODO: Change the keys to struct type to avoid hash colliions
 #[map]
 static KRONOS_FILE_MAP: HashMap<u64, FileMap> = HashMap::with_max_entries(1024, 0);
 
@@ -394,9 +395,9 @@ unsafe fn try_file_open(ctx: LsmContext) -> Result<i32, i32> {
     }
 
     if let Some(pod_bpf_map) = KRONOS_PODS.get(&cgroupid) {
-        info!(&ctx, "cgroupid : {}", cgroupid);
+        // info!(&ctx, "cgroupid : {}", cgroupid);
         let target = pod_bpf_map.target;
-        info!(&ctx, "is file target: {}", target & 1);
+        // info!(&ctx, "is file target: {}", target & 1);
         if (target & 1) != 0 {
             let file: *const vmlinux::file = unsafe { ctx.arg(0) };
 
@@ -407,17 +408,19 @@ unsafe fn try_file_open(ctx: LsmContext) -> Result<i32, i32> {
             let d_name = unsafe { (*(*path_ptr).dentry).d_name };
             let res = helpers::bpf_probe_read_kernel_str_bytes(d_name.name, &mut path_buf);
 
-            // info!(&ctx, "read file name from kernel");
             // let hh = helpers::bpf_d_path(, buf, sz)
             match res.ok() {
                 Some(bytes) => {
+                    info!(&ctx, "read file name from kernel");
                     let my_str = core::str::from_utf8_unchecked(bytes);
                     info!(&ctx, "file name: {}", my_str);
                     let hash = djb2_hash(bytes);
                     let hash = (hash as u64) ^ (pod_bpf_map.namespace_hash as u64);
+
+                    info!(&ctx, "hash for file {}", hash);
                     if let Some(file) = KRONOS_FILE_MAP.get(&hash) {
                         info!(&ctx, "got file");
-                        if file.is_file == 1 {
+                        if file.is_file == 2 {
                             // this implies source exists
                             let res = ctx.command();
                             match res.ok() {
@@ -449,6 +452,10 @@ unsafe fn try_file_open(ctx: LsmContext) -> Result<i32, i32> {
                         } else if file.only_allow == 1 {
                             // execute the action if only file rule is present
                             return Ok(-1);
+                        } else if file.is_file == 1 {
+                            if file.file_action == 1 {
+                                return Ok(-1);
+                            }
                         }
                     }
 

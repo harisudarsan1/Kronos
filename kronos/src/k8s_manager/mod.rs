@@ -5,6 +5,7 @@ use crate::cache_manager::{
 
 use futures::future::join;
 use futures::{Stream, StreamExt};
+use helpers::system::kernel::{get_cgroup_driver, CgroupDriver, CGROUPFS_PATH};
 use helpers::{djb2_hash, k8s_helpers::kubernetes, system::kernel};
 use k8s_watch::{get_pods_from_labels_namespace, watch_crd, watch_pods};
 use kube::ResourceExt;
@@ -25,6 +26,7 @@ use anyhow::{Context, Result};
 mod k8s_watch;
 
 pub struct K8sManager {
+    cgroup_driver: CgroupDriver,
     pod_map_tx: mpsc::Sender<PodCache>,
 
     pub policy_map_tx: mpsc::Sender<PolicyCache>,
@@ -55,8 +57,9 @@ pub struct ChannelSender {
 }
 
 impl K8sManager {
-    pub fn new(channel_sender: ChannelSender) -> Self {
+    pub fn new(channel_sender: ChannelSender, cgroup_driver: CgroupDriver) -> Self {
         let k8s_manager = K8sManager {
+            cgroup_driver: cgroup_driver,
             pod_map_tx: channel_sender.pod_map_tx,
             policy_map_tx: channel_sender.policy_map_tx,
             target_cache_tx: channel_sender.target_cache_tx,
@@ -224,8 +227,9 @@ impl K8sManager {
 
     async fn send_pods_to_ebpf_manager(&self, pod: KronosPod) -> Result<()> {
         let poduid = pod.poduid.clone();
+        let new_poduid = poduid.replace("-", "_");
         let pod_cgroup_path =
-            kernel::get_pod_cgroup_path(&poduid, &pod.qos_class, kubernetes::K8sCluster::Microk8s);
+            kernel::get_pod_cgroup_path(&new_poduid, &pod.qos_class, &self.cgroup_driver);
 
         let namespace_hash = djb2_hash(&pod.namespace);
 
@@ -280,6 +284,8 @@ impl K8sManager {
 
     async fn handle_pod_add(&self, pod: KronosPodContainerInfo) -> Result<()> {
         let pod_uid = pod.poduid;
+        let new_poduid = pod_uid.replace("-", "_");
+
         let podname = pod.podname;
         let qos_class = pod.qos_class;
 
@@ -293,12 +299,15 @@ impl K8sManager {
                 container_name: container.container_name.clone(),
                 container_image: container.container_image.clone(),
             };
-            let container_runtime = c_pod_cont_info.container_id.split("://");
+            // NOTE: container_id looks like this containerd://de89a6cd92d2... the first element of the
+            // split will be the runtime and the second is the actual id of the container
+            let container_id_split: Vec<&str> = c_pod_cont_info.container_id.split("://").collect();
             let cgroup_path = kernel::get_container_cgroup_path(
-                &pod_uid,
+                &new_poduid,
                 &qos_class,
-                &container.container_id.clone(),
-                kubernetes::K8sCluster::K3s,
+                container_id_split[1],
+                container_id_split[0],
+                &self.cgroup_driver,
             );
             let cgroup_id = unsafe { kernel::get_cgroup_id(cgroup_path) };
 
