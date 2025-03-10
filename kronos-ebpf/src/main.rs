@@ -411,13 +411,13 @@ unsafe fn try_file_open(ctx: LsmContext) -> Result<i32, i32> {
             // let hh = helpers::bpf_d_path(, buf, sz)
             match res.ok() {
                 Some(bytes) => {
-                    info!(&ctx, "read file name from kernel");
+                    // info!(&ctx, "read file name from kernel");
                     let my_str = core::str::from_utf8_unchecked(bytes);
-                    info!(&ctx, "file name: {}", my_str);
+                    // info!(&ctx, "file name: {}", my_str);
                     let hash = djb2_hash(bytes);
                     let hash = (hash as u64) ^ (pod_bpf_map.namespace_hash as u64);
 
-                    info!(&ctx, "hash for file {}", hash);
+                    // info!(&ctx, "hash for file {}", hash);
                     if let Some(file) = KRONOS_FILE_MAP.get(&hash) {
                         info!(&ctx, "got file");
                         if file.is_file == 2 {

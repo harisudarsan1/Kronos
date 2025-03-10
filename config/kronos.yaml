@@ -14,10 +14,11 @@ spec:
       labels:
         app: kronos
     spec:
+      serviceAccountName: kronos-sa 
       hostNetwork: true
       containers:
       - name: kronos
-        image: docker.io/harisudarsan/kronos:l1
+        image: docker.io/harisudarsan/kronos:latest
         securityContext:
           privileged: true
           capabilities:
@@ -36,6 +37,8 @@ spec:
         env:
         - name: RUST_LOG
           value: info
+        - name: KUBECONFIG
+          value: /home/harisudarsan/.kube/config
         imagePullPolicy: IfNotPresent
         startupProbe:
           grpc:
