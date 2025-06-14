@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 publish = false
 
+
 [dependencies]
 
 # kronos-bpf-common = { path = "../crates/kronosbpf-common" }
@@ -27,3 +28,10 @@ dashmap = "6.1.0"
 [[bin]]
 name = "kronos"
 path = "src/main.rs"
+
+
+[build-dependencies]
+libbpf-cargo = "0.25.0"
+vmlinux = { git = "https://github.com/libbpf/vmlinux.h.git", rev = "83a228cf37fc65f2d14e4896a04922b5ee531a94" }
+
+
