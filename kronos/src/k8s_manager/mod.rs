@@ -35,6 +35,7 @@ pub struct K8sManager {
     container_tx: mpsc::Sender<ContainerCache>,
 
     pod_filter_map: Arc<RwLock<HashMap<Arc<str>, u32>>>,
+
     // channel for policies
     pub ebpf_policy_sender: mpsc::Sender<PolicyBpfEvent>,
 
@@ -361,11 +362,10 @@ impl K8sManager {
                 sender: Some(send),
             }))?;
         if let Ok(Some(target)) = recv.await {
-            // If this target is zero there are no policies associated with this label+namespace
+            // NOTE: If this target is zero there are no policies associated with this label+namespace
             // key hence we need to remove all pods associated with this in PodCache(this contains
-            // label_namespace to podid_set map) and ebpf. For ebpf just sending the target as it
-            // is is sufficient
-
+            // label_namespace to podid_set map) and ebpf. For ebpf just sending the target
+            // is sufficient enough
             let (send, recv) = oneshot::channel();
             if target != 0 {
                 self.pod_map_tx

@@ -39,7 +39,7 @@ spec:
           value: info
         - name: KUBECONFIG
           value: /home/harisudarsan/.kube/config
-        imagePullPolicy: IfNotPresent
+        imagePullPolicy: Always
         startupProbe:
           grpc:
             port: 9874
